@@ -1,0 +1,178 @@
+---
+title: "Leaflet Mapping from a Geocoded Dataset"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+## Leaflet Mapping A Story
+
+In this file, I tell a story of my travels over the last 5 years (2014-2018)
+
+```{r setup}
+# set working directory
+setwd("C:/Users/saraf/Desktop/CBA/Data Collection/Assignment 2")
+getwd() 
+
+suppressPackageStartupMessages({
+  if (!require(stringr)){ install.packages("stringr")}; library(stringr)
+  if (!require(leaflet)){ install.packages("leaflet")}; library(leaflet)
+  if (!require(jsonlite)){ install.packages("jsonlite")}; library(jsonlite)
+  })
+```
+Loading the city.list.json file and convert it into a 'regular' R dataframe.
+
+```{r json convertion}
+system.time({ df_city_list = jsonlite::fromJSON("./city.list.json") })  # 5.24 secs
+dim(df_city_list)
+str(df_city_list)
+head(df_city_list)
+
+#Subsetting dataset to contain data only for the specified countries
+
+library(stringr)
+df_country_city = which(str_detect(df_city_list$country, "IN|TH"))    # vector positions where country is IN or TH
+
+
+df_city_sub = df_city_list[df_country_city,]     # subsetted dataset that now contains only IN or TH cities
+
+dim(df_city_sub)
+
+```
+### Places I've travelled to in the last 5 years
+
+Jaipur @2014 : This trip was a family vacation spanning a week in the month of October.
+
+Bangkok @2015 : This was a trip with my 3 of my school friends. We visited a range of islands and tried some fun activities like Underwater Seawalk and Kayaking.
+
+Bangalore @2017 : This trip was meant for a college reunion. The event was held in Marriott Hotel, Bangalore.
+
+Manali @2017 : This was a much awaited Long weekend trip with my colleagues in the month of October.
+
+ISB @2018 : A dream come true visit to the ISB Campus in Hyderabad.
+
+Tirthan Valley @2018 : Hiking trip to Tirthan Valley in Himachal Pradesh.
+
+```{r travel}
+cities.travel <- c( "Jaipur", "Bangkok", "Bangalore","Manali", "Hyderabad", "Tirthan Valley")
+
+desc.travel <- c("Family vacation @2014", "Trip with Friends @2015", "College Reunion @2017", 
+               "Weekend Trip @2017", "ISB @2018","Hiking Trip @2018")
+
+# testing geocode availability for my travels
+df_travel_cities = data.frame(id=integer(), name=character(), country=character(), 
+                  coord.lon=numeric(), coord.lat=numeric(), stringsAsFactors=FALSE)
+
+df_travel_cities = df_city_sub[0,]   # Empty dataframe created
+
+cities1 = unique(cities.travel)   # dataframe will not accept duplicate rows
+cities1
+
+# loop in the city details from the city list
+for (i1 in 1:length(cities1)){
+  a1 = df_city_sub[tolower(df_city_sub$name) == tolower(cities1[i1]),]; a1
+  df_travel_cities = rbind(df_travel_cities, a1[1,])
+}
+
+df_travel_cities
+```
+
+### Geocoding *travel destinations*
+
+```{r}
+library(RANN)
+for (i1 in 1: length(cities1))
+{
+  if (tolower(cities1[i1]) %in% tolower(df_city_sub$name) == FALSE) #if the city name does not exist in the json city list
+  {
+      lat <- as.numeric(31.7892) #Latitude for Tirthan Valley
+      #lat <- as.numeric(readline(prompt = "Enter Latitude:"))
+      lon <- as.numeric(76.8972) #Longitude for Tirthan Valley
+      #lon <- as.numeric(readline(prompt = "Enter Longitude:"))
+      country <- "IN"  #Country name for Tirthan Valley
+      #country <- readLine(prompt = "Enter Country:")
+      df_new <- data.frame(lon,lat)
+      df_new
+      df_city_sub$coord
+      df_coord <- data.frame(rbind(df_new, df_city_sub$coord))
+      dim(df_coord)
+      df_coord[1,]
+      nearest <- nn2(df_coord,k=4)[[1]]
+      df_nearest_coord <- data.frame(coord.lon=numeric(),coord.lat=numeric())
+      for(i in nearest[1,])
+      {
+          temp_coord <- df_coord[i,]
+          df_nearest_coord <- rbind(df_nearest_coord,temp_coord)
+      }
+      df_nearest_coord
+      
+      #Calculating mean of the latitudes and longitudes based on the nearest coordinates
+      
+      df_travel_cities$coord$lon[i1] = mean(df_nearest_coord$lon)   
+      df_travel_cities$coord$lat[i1] = mean(df_nearest_coord$lat)
+      df_travel_cities$name[i1] = cities1[i1]
+      df_travel_cities$id[i1] = i1
+      df_travel_cities$country[i1] = country
+  }
+}
+
+df_travel_cities
+```
+
+```{r lat-lon extraction}
+# Extract latlong for target cities into DF
+
+
+df1 = data.frame(city=cities.travel, desc=desc.travel)
+
+for (i1 in 1:length(desc.travel)){
+  df_city_final = which(df_travel_cities$name == cities.travel[i1])
+  df1$lon[i1] = df_travel_cities$coord$lon[df_city_final]
+  df1$lat[i1] = df_travel_cities$coord$lat[df_city_final]
+}
+df1
+```
+Time now to build a 'box' inside which we can call the map.  
+
+To do this, I widen the margins of the max and min latitudes and longitudes just a little bit.
+
+```{r inside the box} 
+
+# for setmaxBounds() func in leaflet
+lng1 = min(df1$lon) - 2; lng1
+lng2 = max(df1$lon) + 2; lng2
+lat1 = min(df1$lat) - 2; lat1
+lat2 = max(df1$lat) + 2; lat2
+```
+### Using leaflet for mapping
+
+Mapping the travel destinations
+
+```{r leaflet}
+
+mymap = leaflet() %>%
+  
+  addProviderTiles("Esri.NatGeoWorldMap") %>%    # try '?addProviderTiles' 
+  
+  addProviderTiles("CartoDB.DarkMatter", 
+                   options = providerTileOptions(opacity = 0.5)) %>%
+  
+  # setView(5, 20, zoom=1) %>%
+  setMaxBounds(lng1, lat1, lng2, lat2) %>%
+  
+  # color and weight arguments for the color and weight of the line
+  addPolylines(data=df1, ~lon, ~lat, color = "white", 
+               weight = 2, opacity = 1) %>%
+  
+  addCircleMarkers(data=df1, ~lon, ~lat,  color = "#C0392B", 
+                   opacity = 0.6, radius = 3, popup = paste(df1$city, df1$desc, sep="<br>"))
+
+mymap
+```
+
+
+
+
+
+
